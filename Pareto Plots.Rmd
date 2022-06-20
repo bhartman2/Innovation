@@ -1,0 +1,125 @@
+---
+title: "Pareto Plots"
+author: "Bruce Hartman"
+output: html_notebook
+---
+
+## Pareto Plots
+Pareto plots are a good way to understand what's important in creating unicorns or increasing their valuation. We use the summarized data frames for Count and TotVal.
+```{r}
+glimpse(x)
+x
+```
+
+```{r}
+glimpse(y)
+y
+```
+
+## Pareto Functions for Plotting
+We use the <code>qcc</code> package to create Pareto chart data from the count data. Then we use <code>ggQC</code> package to create Pareto graphs of Total Valuation by year. We define two functions in a separate file.
+
+- <code>pareto_data_structure</code> creates a Pareto data structure 
+- <code>pareto_plot_object</code> creates a Pareto plot object from the structure.
+
+```{r}
+source("paretoplotbuilder.R")
+```
+
+## Pareto Plots of Count
+```{r}
+for (yr in 2015:2021) {
+  uu = pareto_data_structure(y, yr, which="Count") %>% remove_rownames
+  uu%>% filter(CumPct<80)
+  p=pareto_plot_object(uu, yr, which="Count", main="Pareto Plot")
+  print(p)
+  # ggsave(paste0("Pareto Plot Count Year ",yr,".jpg"), plot=p, device="jpeg")
+}
+```
+## Save Pareto Plots by Count
+```{r}
+for (yr in 2015:2021) {
+  uu = pareto_data_structure(y, yr, which="Count") %>% remove_rownames
+  uu%>% filter(CumPct<80)
+  p=pareto_plot_object(uu, yr, which="Count", main="Pareto Plot")
+  print(p)
+  # ggsave(paste0("Pareto Plot Count Year ",yr,".jpg"), plot=p, device="jpeg")
+}
+```
+
+## Pareto Plots of TotVal
+Calculate the Pareto plot data and make the plot.
+```{r}
+for (yr in 2015:2021) {
+  uu = pareto_data_structure(x, yr, which="TotVal") %>% remove_rownames
+  uu%>% filter(CumPct<80)
+  p=pareto_plot_object(uu, yr, which="TotVal", main="Pareto Plot")
+  print(p)
+  fs=uu
+  print(fs)
+  # ggsave(paste0("Pareto Plot TotVal Year ",yr,".jpg"), plot=p, device="jpeg")
+}
+```
+
+## Save Pareto Plots of TotVal
+```{r}
+for (yr in 2015:2021) {
+  uu = pareto_data_structure(x, yr, which="TotVal") %>% remove_rownames
+  uu%>% filter(CumPct<80)
+  p=pareto_plot_object(uu, yr, which="TotVal", main="Pareto Plot")
+  print(p)
+  # ggsave(paste0("Pareto Plot TotVal Year ",yr,".jpg"), plot=p, device="jpeg")
+}
+```
+
+## Total Valuation by Class and Year
+A barplot will be useful.
+```{r}
+pv=ggplot(x %>% filter(between(Year,2016,2021) )) + 
+  geom_col(aes(Class, TotVal, fill=Class)) +
+  scale_fill_manual(values=c("blue","yellow","red")) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=1)) +
+  labs(title="Total Valuation by Class and Year") +
+  facet_wrap(vars(Year), ncol=2)
+pv
+# ggsave("Valuation by Class and Year.jpg", plot=pv, device="jpeg", height=7 )
+```
+
+## Count by Class and Year
+A barplot will be useful.
+```{r}
+pv=ggplot(y %>% filter(between(Year,2016,2021) )) + 
+  geom_col(aes(Class, Count, fill=Class)) +
+  scale_fill_manual(values=c("blue","yellow","red")) +
+  theme(axis.text.x = element_text(angle = 0, vjust = 0.5, hjust=1)) +
+  labs(title="Count by Class and Year") +
+  facet_wrap(vars(Year), ncol=2)
+pv
+# ggsave("Count by Class and Year.jpg", plot=pv, device="jpeg", height=7 )
+```
+
+## Valuations by Year and Country
+```{r}
+for (yr in 2016:2021){
+  p = ggplot(cbi_more %>% group_by(Country, Class, sum(Valuation)) %>% filter(Year==yr)) + 
+    geom_col(aes(Country,sum(Valuation), fill=Class), alpha=.6, position="stack") +
+    scale_fill_manual(values=c("blue","yellow","red")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0, hjust=.5)) +
+    labs(title=paste0("Total Valuation by Country Year ",yr))
+  print(p)
+  # ggsave(paste0("TotVal by Country Year ",yr,".jpg"), plot=p, device = "jpeg", height=7, width=10)
+}
+```
+
+Next we leave out the USA because it is so much bigger in later years.
+```{r}
+for (yr in 2016:2021){
+  p = ggplot(cbi_more %>% group_by(Country, Class, sum(Valuation)) %>% filter(Year==yr, Country!="United States")) + 
+    geom_col(aes(Country,sum(Valuation), fill=Class), alpha=.6, position="stack") +
+    scale_fill_manual(values=c("blue","yellow","red")) +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0, hjust=.5)) +
+    labs(title=paste0("Total Valuation by Country x-USA Year ",yr))
+  print(p)
+  # ggsave(paste0("TotVal by Country x-USA, Year ",yr,".jpg"), plot=p, device = "jpeg", height=7, width=10)
+}
+```

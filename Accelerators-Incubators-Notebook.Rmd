@@ -1,0 +1,1476 @@
+---
+title: "Accelerators Incubators Notebook"
+output: html_notebook
+---
+
+# Accelerators Incubators Notebook
+
+## Introduction
+We analyze data from the 2500 Accelerators and Incubators Excel file.
+
+## Packages
+We install standard packages.
+```{r warning=FALSE, include=FALSE}
+library(tidyverse)
+library(ggfortify)
+library(GGally)
+library(broom)
+```
+
+## Options
+```{r}
+options(knitr.duplicate.label = "allow")
+```
+
+## Functions
+```{r}
+source("catchphrases.R")
+```
+
+## Data
+The data come from a spreadsheet from CB-Insights [1]. 
+```{r}
+library(readxl)
+X2_500_Accelerators_Incubators <- read_excel("2,500 Accelerators Incubators.xlsx", 
+    skip = 2)
+View(X2_500_Accelerators_Incubators)
+```
+
+## Data Description
+```{r}
+glimpse(X2_500_Accelerators_Incubators)
+```
+
+## Data Wrangling
+We want a short dataframe name, <code>cbi</code>. We rename long column names.
+```{r}
+xai = X2_500_Accelerators_Incubators %>% rename(Name=`Accelerator / Incubator`,
+                                                Stage=`Investment Stage`,
+                                                FoundDate=`Founded Date`,
+                                                NInvestments=`Number of Investments`,
+                                                NExits=`Number of Exits`)
+xai=mutate(xai, FoundDate=as.numeric(FoundDate))
+glimpse(xai)
+```
+
+```{r}
+summary(xai)
+```
+
+
+```{r}
+cp_length(xai %>% pull(City) %>% unique %>% length, 
+          "Cities", dataname="xai")
+xai %>% pull(City) %>% unique %>% head
+```
+
+### Industries
+```{r}
+u = xai %>% pull(Industries) %>% unique
+cp_length(xai %>% pull(Industries) %>% unique %>% length, 
+          "Industries", dataname="xai")
+# data.frame(u)
+```
+
+Create the classes by index of the Industries.
+```{r}
+Soft = c(1, 3, 4, 6, 8, 13)
+Hard = c(2, 5, 9, 10, 11, 12, 15)
+Mixed = c(7, 14)
+
+uS = u[Soft];cat("Soft=",uS, "\n")
+uM = u[Mixed];cat("Mixed=",uM, "\n")
+uH = u[Hard];cat("Hard=",uH,"\n")
+```
+
+## Examining Data
+
+### Distribution by FoundDate
+```{r}
+xai %>% filter(FoundDate<2016) %>% arrange(FoundDate) %>% summarize(Count=n())
+```
+
+
+```{r}
+ggplot(xai %>% filter(FoundDate>2000)
+       , aes(FoundDate,NInvestments)) +
+  geom_point() +
+  # geom_smooth(method="lm", se=T) +
+  labs(title="Number of Investments by Year" #,
+       # subtitle="With linear regression plot"
+       )
+ggplot(xai %>% filter(FoundDate>2000)
+       , aes(FoundDate,NExits)) + geom_point(color="red")
+```
+
+
+
+
+### Particular Peaks
+
+```{r}
+ggplot(xai %>% filter(NInvestments<200), binwidth=1) +
+  geom_histogram(aes(NInvestments),color="black", fill="red", alpha=.3) +
+  labs(title="Histogram counting firms with number of investments",
+       subtitle="A few accelerators make a large number of investments.")
+```
+
+
+```{r echo=FALSE}
+cp_length(xai %>% filter(NInvestments>100) %>% nrow(), paste0("Number of Investments over 100"), dataname="xai")
+xai = xai %>% mutate(obs=row_number(), shortName=str_sub(Name,1,20)) 
+xai %>% 
+  select(obs, shortName, NInvestments, FoundDate, NExits, City) %>% 
+  arrange(desc(NInvestments)) %>% 
+  filter(NInvestments>100) 
+```
+
+## Are there more investments now? And more exits?
+```{r}
+# xai %>% arrange(FoundDate)
+xai %>% arrange(FoundDate) %>% group_by(FoundDate) %>% summarize(TotalNInvestments=sum(NInvestments),
+                                                                 totalNExits=sum(NExits))
+```
+Most of later accelerators do not report number of investments.
+
+## Parsing by Location
+
+```{r echo=FALSE}
+library(countrycode)
+x = xai %>% mutate(CC=countrycode(Country,"country.name", "iso3c")) %>% 
+  select(CC, Country, City, FoundDate, shortName, obs) %>% 
+  arrange(Country, City, FoundDate)
+# %>% 
+  # group_by(Country, City, FoundDate) 
+# %>%
+#   summarize(TotVal=sum(Valuation))
+glimpse(x)
+x
+```
+
+### Geocode the City and Country
+```{r}
+library(tmaptools)
+query=paste(xai$City,xai$Country,sep=",")
+query = ifelse(query=="NA,NA",NA,query)
+query %>% head(20)
+xai= xai %>% mutate(Location=query)
+glimpse(xai)
+```
+
+```{r}
+if(file.exists("xai_gc.RDS")) gc <- readRDS("xai_gc.RDS") else print("No file: run script.")
+```
+
+```{r}
+# source("Accelerator Geocode Country.R")
+glimpse(gc)
+```
+
+
+```{r}
+xai$Latitude = gc$lat
+xai$Longitude = gc$lon
+glimpse(xai)
+```
+
+Use tmap methods.
+```{r}
+library(tmap)
+data("World")
+glimpse(World)
+
+# tmap_mode("view")
+# 
+# tm_shape(World) +
+#    tm_polygons("HPI") # sample 5 cities from the metro dataset
+
+# data(metro)
+# glimpse(metro)
+# 
+# five_cities <- metro[sample(length(metro), 5), ]
+# glimpse(five_cities)
+# 
+# # obtain geocode locations from their long names
+# five_cities_geocode <- geocode_OSM(five_cities$name_long, as.sf = TRUE)
+# glimpse(five_cities_geocode)
+# 
+# # change to interactive mode
+# current.mode <- tmap_mode("view")
+# 
+# # plot metro coordinates in red and geocode coordinates in blue
+# # zoom in to see the differences
+# tm_shape(five_cities) +
+# 	tm_dots(col = "blue") +
+# tm_shape(five_cities_geocode) +
+# 	tm_dots(col = "red")
+# 
+# # restore current mode
+# tmap_mode(current.mode)
+# 
+# qtm(World) #, text="iso_a3"
+# 
+# tm_shape(World) +
+#   tm_dots(col="blue")
+```
+
+### Data frame
+Grab the Accelerator geocode data as a data frame.
+```{r}
+if(file.exists("Accel_df.RDS")) Accel_df1 = readRDS("Accel_df.RDS") else print("No file: run program.")
+```
+
+
+Observe results and correct NA to R's NA; also check for Palestinian Territory which cannot be found in geocoding.
+```{r}
+glimpse(xai)
+glimpse(xai %>% filter(Country != "Palestinian Territory" & !is.na(Country)) )
+xai2=xai %>% filter(Country != "Palestinian Territory" & !is.na(Country))
+glimpse(xai2)
+```
+
+Check out Accel df size and filter the NAs.
+```{r}
+glimpse(Accel_df1)
+glimpse(Accel_df1 %>% filter(is.na(query)))
+```
+
+Make a new df omitting the NAs.
+```{r}
+Accel_df2 = Accel_df1 %>% filter(!is.na(query))
+summary(Accel_df2)
+```
+
+These two should match in obs number. Add the obs and the shortName to the Accel df.
+```{r}
+Accel_df3 = Accel_df2 %>% 
+ mutate(obs=xai %>% filter(Country != "Palestinian Territory" & !is.na(Country)) %>% pull(obs),
+  name=xai %>% filter(Country != "Palestinian Territory" & !is.na(Country)) %>% pull(shortName),
+  country=xai %>% filter(Country != "Palestinian Territory" & !is.na(Country)) %>% pull(Country),
+  industries=xai %>% 
+    filter(Country != "Palestinian Territory" & !is.na(Country)) %>% pull(Industries))
+glimpse(Accel_df3)
+```
+There are 2636 observations. Check that we have the correct names, matching xai names.
+```{r}
+any(Accel_df3$obs != xai2$obs)
+any(Accel_df3$shortName != xai2$shortName)
+```
+
+
+### Shapefile
+Grab the Accelerator geocode data as a shapefile.
+```{r}
+if(file.exists("Accel_sf.shp")) Accel_in = sf::st_read("Accel_sf.shp") else print("No file: run program.")
+glimpse(Accel_in)
+summary(Accel_in)
+Accel_in$query=gsub("Unknown[0-9]*","NA",Accel_in$query)
+Accel_in$query[Accel_in$query=="NA"] = NA
+glimpse(Accel_in)
+```
+
+If the data does not exist run the script to geocode it.
+```{r}
+# source("Accelerator Geocodes Notebook.R")
+```
+
+Make a point map.
+```{r}
+library(tmap)
+tmap_mode(mode="view")
+acc=tm_shape(Accel_in) +
+  tm_dots(col="blue")
+acc
+```
+
+Incubators and Accelerators are concentrated in the US and Europe. Netherlands and Germany as well as the UK have the highest concentration in Europe. 
+
+They are more diffuse in the US, with the large western concentrations in the LA and San Diego area, the San Francisco area and to a small extent in the Seattle area. On the East coast, concentrations occur on the New York - Boston big city axis. Chicago and the DC area have small concentrations. Atlanta, Dallas, Salt Lake City, Phoenix, Minneapolis, and the Colorado area also have small groups.
+
+It's clear the locations are a product of larger concentrations of people.
+
+Now we overlay the accelerators with ports of the world.
+
+```{r}
+# library(sf)
+pshape=sf::st_read("Ports features.json")
+glimpse(pshape)
+pshape %>% pull(prtsize) %>% unique
+```
+
+Change the port shape file with a factor for the various port sizes.
+```{r}
+pshape = pshape %>% mutate( prtsize2 = case_when(
+  prtsize == "Very Small" ~ 1,
+  prtsize == "Unknown" ~ 0,
+  prtsize == "Small" | prtsize =="small" ~ 2,
+  prtsize == "Medium" ~ 3,
+  prtsize == "Large" ~ 4,
+  prtsize == "Big" ~ 5,
+  is.na(prtsize) ~ 0,
+  TRUE ~ 0
+  )
+)
+glimpse(pshape)
+
+
+pshape_map = pshape %>% filter(prtsize2==0|prtsize2>2)
+tm_basemap("OpenStreetMap") +
+  tm_shape(pshape_map) +
+  tm_dots(col="blue")
+
+qtm(pshape %>% filter(prtsize2>2), dots.col="blue")
+```
+
+These are not all ports. Many large ones are omitted, probably because they are not open access.
+
+Try another source [5] https://msi.nga.mil/Publications/WPI
+
+```{r}
+wpi=sf::st_read("WPI_Shapefile/WPI.dbf")
+glimpse(wpi)
+```
+
+```{r}
+wpi %>% pull(HARBORSIZE) %>% unique()
+wpi %>% pull(HARBORTYPE) %>% unique()
+wpi %>% pull(CHAN_DEPTH) %>% unique() %>% sort()
+wpi %>% as.tibble %>% 
+  select(PORT_NAME,COUNTRY, LATITUDE, LONGITUDE, CHAN_DEPTH, MAX_VESSEL) %>% 
+  arrange(CHAN_DEPTH, PORT_NAME) %>% 
+  group_by(PORT_NAME,MAX_VESSEL) %>% 
+  filter(COUNTRY=="US", MAX_VESSEL=="L")
+```
+
+Select the large and medium size ports and plot them with the accelerators.
+```{r}
+wpi_large = wpi %>% filter(HARBORSIZE=="L" | HARBORSIZE=="M" )
+glimpse(wpi_large)
+
+gm = tm_shape(wpi_large, bbox="Europe") +
+  tm_dots(col="blue") +
+  tm_shape(Accel_in, bbox="Europe", is.master=FALSE) +
+  tm_dots(col="red", size=0.01) +
+  tm_layout("Accelerators and Ports")
+gm
+# tmap_save(gm, "Accelerators and Ports.html", selfcontained=TRUE)
+```
+
+## Measuring Relative Spatial Position I
+We will use the <code>spatialrisk</code> package to find the number of incubators inside a circle of given diameter for each port. This package has code written in C++ and so it runs very fast.
+```{r}
+library(spatialrisk)
+```
+
+We use the points_in_circle function [4] which uses the haversine formula to calculate observations within a radius from a center point. The center point is selected as the port. Here is an example with the first large port.
+
+### One Large Port - Los Angeles
+
+Find a large port to serve as focus.
+```{r}
+glimpse(wpi_large)
+wtarget=wpi_large %>% as.tibble %>% filter(HARBORSIZE=="L" & PORT_NAME=="LOS ANGELES") %>% 
+  select(INDEX_NO, PORT_NAME, LONGITUDE, LATITUDE)
+wtarget
+```
+
+Determine accelerators inside a circle of radius 100000 meters of Los Angeles. 100000 meters is about 100000/1609 or `r 100000/1609` miles.
+```{r}
+xai_sub = xai2 %>% 
+  select(shortName, obs, Location, Latitude, Longitude)
+glimpse(xai_sub)
+
+glimpse(Accel_df3)
+
+answer = purrr::map2_dfr(wtarget$LONGITUDE, wtarget$LATITUDE, 
+                         ~spatialrisk::points_in_circle(data=Accel_df3 , .x, .y,
+                                                        lon, lat, 
+                                                        radius = 30000))
+glimpse(answer)
+cbind(wtarget, answer)
+
+glimpse(cbind(wtarget, answer))
+```
+
+## All Ports
+This looks very promising. Look for all Accelerators within a radius of the Large ports.
+```{r}
+wtarget=wpi_large %>% as.tibble %>% filter(HARBORSIZE=="L") %>% 
+  select(INDEX_NO, PORT_NAME, LONGITUDE, LATITUDE, COUNTRY)
+radius=20000
+targets= c(1:nrow(wtarget))
+ball_list=list()
+ball_specs=list()
+for (i in targets) {
+  w=wtarget[i,]
+  ans = purrr::map2_dfr(w$LONGITUDE, w$LATITUDE, 
+                         ~spatialrisk::points_in_circle(data=Accel_df3 , .x, .y,
+                                                        lon, lat, 
+                                                        radius = radius))
+  ans_count=nrow(ans)
+  ball_list[w$PORT_NAME] = list(count=ans_count)
+  if(ans_count>0) {
+    # glimpse(ans)
+    ans_short = ans %>% select(query, lon, lat, obs, name, distance_m)
+    res = cbind(w, ans_short)
+    # print(res)
+    res_count = nrow(res)
+    res_which = res$obs
+    res_name = res$name
+    res_port = w$PORT_NAME
+    res_pindex = w$INDEX_NO
+    ball_specs[w$PORT_NAME] = list(nearest=res)
+  }
+}
+```
+
+Look at results.
+```{r}
+# length(ball_list)
+ball_frame = data.frame(Port=wtarget[targets,"PORT_NAME"],
+                        PortID=wtarget[targets,"INDEX_NO"],
+                        Country=wtarget[targets,"COUNTRY"],
+                        Count=matrix(unlist(ball_list), nrow=length(ball_list), byrow=TRUE))
+ball_frame
+ball_frame %>% arrange(desc(Count), PORT_NAME)
+ball_frame %>% arrange(desc(Count), PORT_NAME) %>% group_by(Count) %>% 
+  summarize(number=n()) %>% arrange(desc(Count))
+
+# ball_specs
+```
+
+## Histograms
+
+First a simple histogram, censoring the large number of accelerators/incubators in London.
+```{r warning=FALSE}
+n=max(ball_frame$Count)
+r=32
+q=scales::oob_censor(ball_frame$Count, range=c(0,r))
+xq=ball_frame %>% filter(is.na(q))
+knitr::kable(xq %>% arrange(desc(Count)), caption="Ports out of range")
+ggplot() + 
+  geom_histogram(aes(q, y=..density..), 
+                 color="black", fill="red2", alpha=.25, 
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=1:min(n,r), minor_breaks=NULL) + 
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title="Number of Ports with a given number of Accelerators",
+       subtitle=paste0("within ",radius, " meters.", " Number of Ports =", length(q), ".")) +
+  theme_bw() +
+  geom_text(aes(x=r-3,y=2,label=paste0(xq$PORT_NAME,"\n",xq$Count)))
+```
+
+## Histograms of Port Countries
+
+### US Ports
+A histogram of US Ports.
+
+Set the country and extract the ports with counts.
+```{r warning=FALSE}
+ctry="US"
+b_f = ball_frame %>% filter(COUNTRY==ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Set plot parameters and draw histogram. Choose r=40 to leave out New York-Brooklyn and San Francisco-Oakland.
+```{r warning=FALSE}
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= 40 # max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("US xNew York-Brooklyn and San Francisco-Oakland",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("US xNew York-Brooklyn and San Francisco-Oakland",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+### GB Ports
+A histogram of UK (coded as GB) Ports.
+
+Set the country and extract the ports with counts.
+```{r warning=FALSE}
+ctry="GB"
+b_f = ball_frame %>% filter(COUNTRY==ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Set plot parameters and draw histogram. London has 116, the others less than 3.
+```{r warning=FALSE}
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= 25 # max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("UK xLondon",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("UK xLondon",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+### NL Ports
+A histogram of Netherlands (coded as NL) Ports.
+
+Set the country and extract the ports with counts.
+```{r warning=FALSE}
+ctry="NL"
+b_f = ball_frame %>% filter(COUNTRY==ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Set plot parameters and draw histogram. Amsterdam has 19, Rotterdam 4
+```{r warning=FALSE}
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= 20 # max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("NL",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("NL",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+### CN Ports
+A histogram of China (coded as CN) Ports.
+
+Set the country and extract the ports with counts.
+```{r warning=FALSE}
+countrycode::countryname("Hong Kong", destination="iso2c")
+ctry=c("CN","HK")
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Set plot parameters and draw histogram. Hong Kong has 24, Shanghai has 8, Dalian 1, and the rest none.
+```{r warning=FALSE}
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("CN and HK",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("CN and HK",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+50% of CN and HK ports have no accelerator, another one, Dalian,  have only one. Shanghai has 8 and Hongkong has 24.
+
+### EU Ports
+A histogram of European Union Ports.
+
+Retrieve EU country codes and names.
+```{r}
+source("EUcountries.R")
+EU_countries_df
+EU_alpha2s = EU_countries_df %>% pull(alpha2)
+```
+
+
+Set the country and extract the ports with counts.
+```{r warning=FALSE}
+ctry=EU_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Set plot parameters and draw histogram. Barcelona has 25, Lisboa 20, Amsterdam 19, Copenhagen 10, and the rest fewer, but much of the EU has at least a few accelerators nearby.
+
+Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("EU",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("EU",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+### ASEAN Countries
+A histogram of ASEAN Ports.
+
+Retrieve ASEAN country codes and names.
+```{r}
+ASEANcountries = c("Brunei", "Cambodia", "Indonesia", "Laos", "Malaysia", "Myanmar", "Philippines", "Singapore", "Thailand", "Vietnam")
+ASEAN_alpha2s = countrycode::countryname(ASEANcountries, destination = "iso2c")
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=ASEAN_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Johor, Keppel, and Jurong Island in or around Singapore have 43, Jakarta 11, Manila 4, and Bangkok 3, and the rest none.
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("ASEAN",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("ASEAN",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+There is one cluster at Singapore. 
+
+### Northern East Asia Ports
+A histogram of Northern East Asia Ports.
+
+Retrieve Northern East Asia Ports country codes and names.
+```{r}
+NEAcountries = c("Japan", "Taiwan", "South Korea", "North Korea", "Philippines")
+NEA_alpha2s = countrycode::countryname(NEAcountries, destination = "iso2c")
+NEA_alpha2s
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=NEA_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Most are in Japan.
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("NEA",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("NEA",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+### Gulf Ports
+```{r}
+GULFcountries=c("Bahrain", "Kuwait", "Oman", "Qatar", "Saudi Arabia", "United Arab Emirates", "Iran", "Iraq", "Yemen")
+GULF_alpha2s = countrycode::countryname(GULFcountries, destination = "iso2c")
+GULF_alpha2s
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=GULF_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Only two large ports are in this area, in Yemen and the UAE. Neither has nearby accelerators.
+
+### Mediterranean Ports
+
+```{r}
+MEDcountries=c("Spain", "France", "Italy", "Greece", "Turkey", "Lebanon", "Israel", "Morocco", "Algeria","Tunisia","Libya","Egypt","Syria","Bulgaria","Serbia","Croatia","Slovenia")
+MED_alpha2s = countrycode::countryname(MEDcountries, destination = "iso2c")
+MED_alpha2s
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=MED_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Barcelona has 25 Accelerators, Istanbul 15, Piraeus 5, Beirut 4, Casablanca 3, Rouen 2 (not on the Mediterranean), and Alexandria 2. Three ports (Naples, Tarragona and Izmir) have 1 accelerator. All others have none.
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("MED",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("MED",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+Over 70% of Ports have no Accelerator near.
+
+### Indian Area Ports
+Indian Area here includes states around the Indian ocean.
+```{r}
+INDcountries=c("India", "Pakistan", "Bangladesh", "Sri Lanka", "Myanmar", "Indonesia", "Somalia",
+               "Thailand", "Kenya", "Tanzania")
+IND_alpha2s = countrycode::countryname(INDcountries, destination = "iso2c")
+IND_alpha2s
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=IND_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Mumbai with 18 and Jakarta with 11 have large numbers of Accelerators. Bangkok, Chennai, and Calcutta each have 3. The rest have none.
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("IND",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("IND",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+### South Pacific Ports
+The area here includes states around the west Pacific ocean.
+```{r}
+ANZcountries=c("Australia", "New Zealand", "Guam")
+ANZ_alpha2s = countrycode::countryname(ANZcountries, destination = "iso2c")
+ANZ_alpha2s
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=ANZ_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Sydney with 30 and Melbourne with 12 have large numbers of Accelerators. Brisbane has 4, Wellington 3, and Auckland and Fremantle each have 1. The rest have none.
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("ANZ",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("ANZ",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+### South and Central American Ports
+The area here includes states around the west Pacific ocean.
+```{r}
+SAMcountries=c("Mexico", "Panama", "Colombia","Cuba", "Haiti", "Dominican Republic",
+               "Puerto Rico", "Bahamas", "Guadeloupe","Barbados", "Venezuela", "Guyana",
+               "Peru", "Brazil", "Chile","Uruguay", "Argentina", "Falkland Islands",
+               "Bermuda", "Trinidad and Tobago","Antigua", "Martinique", "Jamaica")
+SAM_alpha2s = countrycode::countryname(SAMcountries, destination = "iso2c")
+SAM_alpha2s
+```
+
+Set the country list and extract the ports with counts.
+```{r warning=FALSE}
+ctry=SAM_alpha2s
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Buenos Aires Argentina has 5 Accelerators, Rio de Janiero,Brazil has 2, and Tubarao, Brazil has 1. None of the others have any Accelerators.
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("SAM",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("SAM",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+## Medium Size Ports
+In this section we will analyze 20000 meter circles for ports with HARBORSIZE = "M" for medium size.
+
+```{r}
+wtarget=wpi_large %>% as.tibble %>% filter(HARBORSIZE=="M") %>% 
+  select(INDEX_NO, PORT_NAME, LONGITUDE, LATITUDE, COUNTRY)
+wtarget %>% arrange(PORT_NAME)
+```
+
+There are 362 ports with Medium harborsize.
+
+Now we find the Accelerators in a 20000 meter circle of each port.
+```{r}
+radius=20000
+targets= c(1:nrow(wtarget))
+ball_list=list()
+ball_specs=list()
+for (i in targets) {
+  w=wtarget[i,]
+  ans = purrr::map2_dfr(w$LONGITUDE, w$LATITUDE, 
+                         ~spatialrisk::points_in_circle(data=Accel_df3 , .x, .y,
+                                                        lon, lat, 
+                                                        radius = radius))
+  ans_count=nrow(ans)
+  ball_list[w$PORT_NAME] = list(count=ans_count)
+  if(ans_count>0) {
+    # glimpse(ans)
+    ans_short = ans %>% select(query, lon, lat, obs, name, distance_m)
+    res = cbind(w, ans_short)
+    # print(res)
+    res_count = nrow(res)
+    res_which = res$obs
+    res_name = res$name
+    res_port = w$PORT_NAME
+    res_pindex = w$INDEX_NO
+    ball_specs[w$PORT_NAME] = list(nearest=res)
+  }
+}
+```
+
+Find the accelerators inside the circle.
+```{r}
+length(wtarget$PORT_NAME)
+length(ball_list)
+length(ball_specs)
+ball_frame = data.frame(Port=wtarget[targets,"PORT_NAME"],
+                        PortID=wtarget[targets,"INDEX_NO"],
+                        Country=wtarget[targets,"COUNTRY"],
+                        Count=matrix(unlist(ball_list), nrow=length(wtarget$PORT_NAME), byrow=TRUE) #ball_list
+                        )
+ball_frame
+ball_frame %>% arrange(desc(Count), PORT_NAME)
+ball_frame %>% arrange(desc(Count), PORT_NAME) %>% group_by(Count) %>% 
+  summarize(number=n()) %>% arrange(desc(Count))
+
+# ball_specs
+```
+
+```{r warning=FALSE}
+ctry=ball_frame$COUNTRY
+b_f = ball_frame %>% filter(COUNTRY %in% ctry)
+# glimpse(b_f)
+
+xq=b_f %>% filter(is.na(Count))
+# glimpse(xq)
+if(nrow(xq)>0) 
+  xq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports out of range."))
+
+yq=b_f %>% filter(!is.na(Count))
+if(nrow(yq)>0) 
+  yq %>% arrange(desc(Count)) else
+    print(paste0("No ",ctry, " ports in range."))
+```
+
+Set plot parameters and draw histogram. Make histograms of count and fraction.
+```{r warning=FALSE}
+# get largest count, usually at the 0 number of accelerators
+h = yq %>% arrange(desc(Count)) %>% group_by(Count) %>%
+  summarize(nlevel=n()) %>% pull(nlevel) %>% max()
+# get largest number of Accelerators
+n=max(b_f$Count)
+# this parameter sets range of counts
+r= 50 #max(yq$Count)
+
+q=scales::oob_censor(b_f$Count, range=c(0,r))
+
+p1=ggplot() + 
+  geom_histogram(aes(q), # , y=..density..
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-0.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(breaks=1:h, minor_breaks=NULL) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,h)) + 
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Number of Ports",
+       title=paste0("Medium Harborsize",
+       " Ports and\nAccelerators Count"),
+       subtitle=paste0("Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n")) +
+  theme_bw()
+
+p2=ggplot() + 
+  geom_histogram(aes(q, y=..density..), # 
+                 color="black", fill="red2", alpha=.25,
+                 binwidth=1, boundary=-.5) +
+  scale_x_continuous(breaks=0:min(n,r), minor_breaks=NULL) +
+  scale_y_continuous(n.breaks=10) +
+  coord_cartesian(xlim=c(0,min(n,r)), ylim=c(0,1)) +
+  theme(panel.grid.minor.x = element_blank()) +
+  labs(x="Number of Accelerators", y="Fraction of Ports",
+       title=paste0("Medium Harborsize",
+       " Ports and \nAccelerator Density"),
+       subtitle=paste0("Fraction ","Within radius of ",radius, " meters.", 
+                       " Number of Ports = ", length(q), ".\n",
+                       "One port contributes density of ",round(1/length(q),5))) +
+  theme_bw()
+p1
+p2
+```
+
+
+## Conclusion
+
+## References
+
+# End
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+```{r}
+px=ggplot(x %>% filter(between(Year,2016,2021) )) + 
+  geom_col(aes(IndShort,TotVal, fill=Class), color="black", alpha=1) +
+  scale_fill_manual(values = c("blue","yellow","red")) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1)) +
+  labs(title="Total Valuations by Industry and Year",
+       x="Industry") +
+  facet_wrap(vars(Year), ncol=2)
+px
+# ggsave("Valuations by Industry and Year.jpg", plot=px, device="jpeg", height=7 )
+```
+
+Total Valuation in 2021 is higher in specific industries, particularly Fintech and Internet services & software. These two have been big since 2018. In 2017 it was far and away Artificial intelligence, with Edtech far behind. In 2016 it was E-commerce & direct-to-consumer. It's clear the big valuations are occurring in areas which are not Hardware-related.
+
+### Count by Industry
+```{r}
+y = cbi_more %>% arrange(Year, Industry) %>% group_by(IndShort, Year, Class) %>% summarize(Count=n())
+glimpse(y)
+```
+
+```{r}
+py=ggplot(y %>% filter(between(Year,2016,2021) )) + 
+  geom_col(aes(IndShort,Count, fill=Class), color="black", alpha=1, orientation="x") +
+  scale_fill_manual(values=c("blue","yellow","red")) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1)) +
+  labs(title="Count by Industry and Year") +
+  facet_wrap(vars(Year), ncol=2)
+py
+# ggsave("Counts by Industry and Year.jpg", plot=py, device="jpeg", height=7 )
+```
+If we look at counts of firms by Industry over these same years, we see that in 2021, Artificial intelligence, E-commerce & direct-to-consumer, Fintech, Health, and Internet software & services dominate.  Supply chain, logistics & delivery has become noticeable, as has Cybersecurity.
+
+
+## References
+1. https://www.cbinsights.com/?utm_campaign=marketing_unicorns-list_2022-02
+
+2. https://stackoverflow.com/questions/1735540/creating-a-pareto-chart-with-ggplot2-and-r
+
+3. https://stats.stackexchange.com/questions/36212/what-tests-do-i-use-to-confirm-that-residuals-are-normally-distributed
+
+4. https://stackoverflow.com/questions/31668163/geographic-geospatial-distance-between-2-lists-of-lat-lon-points-coordinates
+
+5. https://msi.nga.mil/Publications/WPI
+
+
+
