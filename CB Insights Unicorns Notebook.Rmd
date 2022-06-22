@@ -1,0 +1,507 @@
+---
+title: "CB Insights Unicorns Notebook"
+output: html_notebook
+---
+
+# CB Insights Unicorns Analytics
+
+## Introduction
+We analyze data from CB Insights, on the global unicorn club [1].
+
+## Packages
+```{r warning=FALSE}
+library(tidyverse)
+library(ggfortify)
+library(GGally)
+library(broom)
+library(olsrr)
+library(flextable)
+```
+
+## Functions
+```{r}
+source("catchphrases.R")
+```
+
+## Data
+The data come from a spreadsheet from CB-Insights [1]. 
+```{r}
+library(readxl)
+CB_Insights_Global_Unicorn_Club_2022 <- read_excel("CB-Insights_Global-Unicorn-Club_2022.xlsx", 
+    col_types = c("text", "numeric", "date", 
+        "text", "text", "text", "text"), 
+    skip = 2)
+View(CB_Insights_Global_Unicorn_Club_2022)
+```
+
+## Data Description
+```{r}
+glimpse(CB_Insights_Global_Unicorn_Club_2022)
+```
+
+## Data Wrangling
+We want a short dataframe name, <code>cbi</code>. Also Category is really a City. So we rename that column.
+```{r}
+cbi = CB_Insights_Global_Unicorn_Club_2022 %>% rename(City=Category, Valuation=`Valuation ($B)`,
+                                                     AddDate=`Date Added`, SelInvestors=`Select Investors` )
+glimpse(cbi)
+```
+
+### Issues with Industry names
+In Industry we see Artificial intelligence with and without a capital I for Intelligence.  We will combine these by altering those with the large I to the small i.
+
+We also see Fintech and Finttech. We will change the latter to the former.
+```{r}
+cbi[cbi$Industry=="Artificial Intelligence","Industry"] = "Artificial intelligence"
+cbi[cbi$Industry=="Finttech","Industry"] = "Fintech"
+unique(cbi$Industry)
+```
+
+We need short industry names, for display purposes.
+```{r}
+indshort = str_sub(cbi$Industry, 1, 14)
+indshort %>% unique
+cbi$IndShort = indshort
+```
+
+### Unique Industries, Countries, and Cities
+What are the unique industries and countries, and cities?
+```{r}
+cp_length(cbi %>% pull(Industry) %>% unique %>% length, 
+          "Industries", dataname="unicorns")
+cbi %>% pull(Industry) %>% unique
+```
+
+```{r}
+cp_length(cbi %>% pull(Country) %>% unique %>% length, 
+          "Countries", dataname="unicorns")
+cbi %>% pull(Country) %>% unique 
+```
+
+```{r}
+cp_length(cbi %>% pull(City) %>% unique %>% length, 
+          "Cities", dataname="unicorns")
+cbi %>% pull(City) %>% unique
+```
+
+### Classification of Industries
+We'll classify industries by Software and Hardware and Mixed, which might be either for the chosen industry.
+```{r}
+u =cbi %>% pull(Industry) %>% unique
+u
+```
+
+Create the classes by index of the Industries.
+```{r}
+Soft = c(1, 3, 4, 6, 8, 13)
+Hard = c(2, 5, 9, 10, 11, 12, 15)
+Mixed = c(7, 14)
+
+uS = u[Soft];cat("Soft=",uS, "\n")
+uM = u[Mixed];cat("Mixed=",uM, "\n")
+uH = u[Hard];cat("Hard=",uH,"\n")
+```
+
+### Add Year/Month and Year/Quarter
+Create functions to compute year-month and year-quarter.
+```{r include=FALSE}
+require(lubridate)
+ym = function(x) {
+  lubridate::year(x)+(lubridate::month(x)-1)/12
+}
+yq = function(x) {
+  lubridate::year(x)+((month(x)-1)%%4)/4
+}
+```
+
+Add to cbi dataframe to get <code>cbi_more</code>.
+```{r}
+cbi_more = cbi %>% mutate(Year=lubridate::year(AddDate),
+                          Month=lubridate::month(AddDate),
+                          YM = ym(AddDate),
+                          YQ = yq(AddDate),
+                          Class = factor(case_when (
+                              Industry %in% uS ~ "Soft",
+                              Industry %in% uM ~ "Mixed",
+                              TRUE ~ "Hard") ) )
+data.frame(cbi_more)
+```
+
+## Examining Data
+
+### Distribution of Valuation
+The distribution is highly skewed. We plot all unicorns and the unicorns with valuation under $5B.
+```{r echo=FALSE}
+a=ggplot(cbi_more) +
+  geom_histogram(aes(Valuation), color="black",fill="red1", alpha=.3, binwidth=1) + 
+  labs(title="Unicorn Valuations histogram",
+       subtitle="All Unicorns",
+       x="Valuation ($B)")
+
+b=ggplot(cbi_more %>% filter(Valuation<=5)) +
+  geom_histogram(aes(Valuation), color="black",fill="red1", alpha=.3, binwidth=.25) + 
+  labs(title="",
+       subtitle = "Firms under $5 B",
+       x="Valuation ($B)")
+
+new('ggmultiplot', ncol=2, plots=list(a,b))
+```
+### Distribution of Logged Valuation
+Let us investigate the log base 10 of Valuation, since these plots are almost exponentially declining. Note that on this plot 1.0 on the log(Valuation) axis represents \$10B valuation. 
+```{r}
+ggplot(cbi_more, aes(x = log10(Valuation))) + 
+    geom_histogram(binwidth = .05, fill = "red1", color = "black", alpha=.3) + 
+    labs(title="Unicorn logged Valuations histogram",
+       subtitle = "All firms, logarithms",
+       x="log10(Valuation) ($B)") 
+```
+Even for firms with less than \$10B Valuation, there is a predominance of small fundings in the first bin, less than $\log10(Valuation) = .01$, or Valuation = \$`r 10^.01`B.
+
+### Distribution of Logged Valuation by Class
+```{r echo=FALSE}
+ggplot(cbi_more, aes(x = log10(Valuation))) + 
+  geom_histogram(binwidth = .05, fill = "red1", color = "black", alpha=.3) + 
+  labs(title="Unicorn Valuations histogram",
+       subtitle = "All firms, logarithms",
+       x="log10(Valuation) ($B)") +
+  facet_wrap(vars(Class))
+```
+There are a lot more Class Soft firms.
+
+## Distribution by AddDate
+There are fewer cases before 2016.
+```{r}
+cbi_more %>% filter(Year<2016) %>% arrange(AddDate)
+cbi_more %>% filter(Year<2016) %>% arrange(AddDate) %>% summarize(Count=n())
+```
+
+It appears there are 58, compared to 1066 cases in all,  `r 100*58/1066` percent of cases.  So we filter the early ones out before plotting.
+```{r}
+ggplot(cbi_more %>% filter(Year>2016), aes(AddDate,log10(Valuation))) +
+  geom_point() +
+  geom_smooth(method="lm", se=T) +
+  labs(title="Log of Valuation by Date",
+       subtitle="With linear regression plot")
+```
+
+There does not seem to be an increase in Valuation over time. In fact, a regression shows declining values of log10(Valuation).  Some numeric tests of normality of residuals show non-normality. The $R^2=.07$, very low. The slope of the decline is computed in the tidy summary here.
+```{r} 
+fit=lm(log10(Valuation)~AddDate, data=cbi_more %>% filter(Year>=2016) )
+ols_test_normality(fit)
+summary(fit) %>% glance
+summary(fit) %>% tidy(conf.int=T)
+```
+
+For each day later add to list, there is a decline of `r coef(fit)[2]` in log10(Valuation), or `r 365*10^coef(fit)[2]` of Valuation for a year later. The $R^2$ of this regression is very low, although the regression is meaningful, and the slope coefficient is significant. Residuals are not convincingly normal with $\mu$ =0, $\sigma$ =constant.
+
+## Valuation Groups by Date Added
+The frequency of unicorns increases as we go along. One question is whether the Valuations also increase. This issue is clouded because of the variety of funding strategies, from Series A investments to Series B and C, and later on SPAC investments, with the recently emerging Private Investment in Public Equity) (PIPE) investments. We do not know the discounts or costs to the startup required for each type of investment. However, we are looking at valuations today. <code>TotVal</code> is our shorthand for the sum of Valuation in a group of observations.
+
+We create summary dataframes by month using YM, by quarter using YQ, and by Class using Class, and plot them.
+```{r echo=FALSE, message=FALSE}
+cbi_m = cbi_more %>% group_by(Class, YM) %>% summarize(TotVal=sum(Valuation))
+# glimpse(cbi_m)
+cbi_q = cbi_more %>% group_by(Class, YQ) %>% summarize(TotVal=sum(Valuation))
+# glimpse(cbi_c)
+
+# ggplot(cbi_m) +
+#   geom_col(aes(YM, TotVal), color="black", fill="red2", alpha=.3) +
+#   labs(title="Total Valuation in Year and Month")
+# ggplot(cbi_q) +
+#   geom_col(aes(YQ, TotVal), color="black", fill="red2", alpha=.3) +
+#   labs(title="Total Valuation in Year and Quarter")
+# c=ggplot(cbi_c) +
+#   geom_col(aes(YQ, TotVal), color="black", fill="red2", alpha=.3) +
+#   labs(title="Total Valuation in Year and Quarter by Class") +
+#   facet_wrap(vars(Class)) +
+#   theme_bw()
+c=ggplot(cbi_m, aes(x = YM, y = TotVal, fill = Class)) + 
+  geom_bar(stat = "identity", color="black") +
+  scale_fill_discrete(labels = c("Hard", "Mixed", "Soft"), type = c("blue","orange","red")) +
+  labs(title="Total Valuation in Year and Month by Class") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+c
+d=ggplot(cbi_q, aes(x = YQ, y = TotVal, fill = Class)) + 
+  geom_bar(stat = "identity", color="black") +
+  scale_fill_discrete(labels = c("Hard", "Mixed", "Soft"), type = c("blue","orange","red")) +
+  labs(title="Total Valuation in Year and Quarter by Class") +
+  theme_bw() +
+  theme(legend.position = "bottom")
+d
+
+# ggsave("Total Valuation by Quarter and Class.jpg", plot=d, device="jpeg", dpi=600)
+```
+
+Clearly there are more Class S unicorns than Classes H and W. There is also growth with time in Total Valuation.  What kind of fit is there to this growth in total valuation by month? by quarter?
+
+### By Month
+A linear model fitting log(Valuation) to TotVal is performed, after experimentation with linear and polynomial fits shows it is better. First we record the linear regression. Then we run the log regression. For the log regression, three of the OLS residual normality tests show normal residuals at the .05 sdignificance level. We report the overall summary and the coefficients. 
+```{r include=FALSE}
+fit.sumval = lm(TotVal~YM, data=cbi_m)
+ols_test_normality(fit.sumval)
+summary(fit.sumval) %>% glance
+```
+
+```{r}
+fit.sumval_exp=lm(log(TotVal)~YM, data=cbi_m)
+ols_test_normality(fit.sumval_exp)
+summary(fit.sumval_exp) %>% glance
+summary(fit.sumval_exp) %>% tidy(conf.int=T)
+```
+
+Plotting the regression results, we have
+```{r}
+ggplot(cbi_m) +
+  geom_point(aes(YM, log(TotVal))) +
+  geom_smooth(aes(YM, log(TotVal)), method="lm", se=T, formula='y~x') +
+  geom_text(aes(x=2010, y=3, label=paste0("Slope=",round(coef(fit.sumval_exp)[2], digits=4)))) +
+  geom_text(aes(x=2010,y=2.5, 
+                label=paste0("Total Valuation Change/Year=$",
+                             round(exp(coef(fit.sumval_exp)[2]), digits=3),
+                             "B"))) +
+  labs(title="Log of Total Valuation by Year and Month")
+```
+
+### Structural Change
+Is there a structural change in TotVal over this period?  We first plot actual TotVal rather than the logs to check, with a few of the high-Total Valuation months before 2021. There were too many in 2021 and later.
+```{r echo=FALSE}
+UCL=mean(cbi_m$TotVal) + 2*sd(cbi_m$TotVal)
+cbi_m %>% ggplot(aes(YM,TotVal)) + 
+  lemon::geom_pointline(linetype="dotted") +
+  geom_hline(aes(yintercept=UCL), linetype="dotted", color="red") +
+  geom_label(data=cbi_m %>% filter(TotVal>UCL & YM<2021), 
+                                    aes(x=YM, y=TotVal,label=round(YM,digits=2)), nudge_y=10) +
+  geom_text(x=2008, y=UCL, label=round(UCL,2)) +
+  labs(title="Month TotVal by Year and Month, before 2021",
+       subtitle="showing Unicorns over 2 std dev above mean",
+       y="TotVal, $B in Month")
+```
+
+This graph shows that there appears to be a break at the end of 2020 when the amount of valuation in a month increases much faster. The 2 standard-deviation line shows four anomalous unicorns two standard deviations above the mean of TotVal for a month, prior to 2019, but only a slight increase overall, perhaps not significant. A Chow Test might confirm breaks. Or the break might be later. 
+
+```{r echo=FALSE}
+library(strucchange)
+bpm=strucchange::breakpoints(TotVal~YM, data=cbi_m %>% arrange(YM))
+cat("The breakpoint is at observation", bpm$breakpoints,".\n")
+sctest(TotVal~YM, data=cbi_m %>% arrange(YM), type = "Chow", point = bpm$breakpoints[1])
+sctest(TotVal~YM, data=cbi_m %>% arrange(YM), type = "Chow", point = bpm$breakpoints[2])
+mutate((cbi_m %>% arrange(YM))[bpm$breakpoints,], Break=bpm$breakpoints)
+```
+
+The breakpoint test indicates significant breakpoints at observations 59 and 183, which are April 2017 and January 2021.  Let's look at the regressions, for before January 2021 first, then after January 2021, as the first breakpoint is of less interest.
+```{r echo=FALSE}
+a = ggplot(cbi_m %>% filter(YM<2021.25)) +
+  geom_point(aes(YM, TotVal)) +
+  geom_smooth(aes(YM, TotVal), method="lm", se=T, formula='y~x') +
+  geom_text(aes(x=2010, y=100, label=paste0("Slope=",
+              round(coef(lm(TotVal~YM, data=cbi_m %>% filter(YM<2021) ))[2],3)))) +
+  labs(title="Regressions of TotVal of Months",
+       subtitle = "Up To January 2021")
+
+b =ggplot(cbi_m %>% filter(YM>=2021.16)) +
+  geom_point(aes(YM, TotVal)) +
+  geom_smooth(aes(YM, TotVal), method="lm", se=T, formula='y~x') +
+  geom_text(aes(x=2021.50, y=50, label=paste0("Slope= ",
+              round(coef(lm(TotVal~YM, 
+                      data=cbi_m %>% filter(YM>=2021.16)))[2],3)))) +
+  labs(title="",subtitle="After January 2021")
+
+new('ggmultiplot', ncol=2, plots=list(a,b))
+```
+
+The graphs show that before the start of 2021 the growth was \$.2B per year, but after 2021 started the drop was \$26B per year, a dramatic decline in the size of the Total Valuation in a month.
+
+### Particular Peaks
+There were in addition peaks in particular months; January 2014 and December 2012. Those big bumps did not hold for a trend. They might be due to one large firm in each period. Here are the months greater than\$ `r round(UCL,2)`B Total Valuation. There are only 4 large ones before 2021.
+```{r echo=FALSE}
+cp_length(cbi_m %>% filter(TotVal>UCL) %>% nrow(), paste0("TotVal over $", round(UCL,2),  "B"), dataname="Monthly TotVal")
+```
+
+```{r echo=FALSE}
+cbi_m %>% filter(TotVal>UCL) %>% arrange(YM)
+```
+
+Only 4 months are before 2021. Here are the records in those periods before 2021.
+```{r}
+cbi_more %>% filter(between(YM,2012.91,2012.92)) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% filter(YM==2014.00) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% filter(YM==2017.25) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+```
+
+In 2012, Spacex was the big dog at \$100B. In 2014, Stripe was valued at \$95B. In 2017, 7 more companies appear, but only Bytedance has a valuation over \$4B, at a level of \$140B.
+
+2018 shows a different pattern.
+```{r}
+cbi_more %>% arrange(YM) %>% filter(YM == 2018.00) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM) %>% filter(YM == 2018.25) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM) %>% filter(YM == 2018.50) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM) %>% filter(YM == 2018.75) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+```
+
+In January 2018, there were only 5; only Canva at \$40B is large; Ziroom at \$6B was substantially smaller, and the others are between \$1B and \$2B
+
+In April 2018, there were 10; the top 3 (Revolut, Discord, and Flexport) were all over \$8B; the others under \$3.4B.
+
+In July 2018, there were 16. SHEIN at \$15B and Bitmain at \$12B topped \$10B each, three others (Pony.ai, Automation Anywhere, and Greensill) were over \$4B, and the rest smaller.
+
+In October 2018 the number was 13. Epic Games led with \$42B; three others (Devoted Health, Brex, and Talkdesk) were over \$10B, Monzo was at \$4.5B, and the rest lower.
+
+```{r eval=FALSE, include=FALSE}
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2019, 2019.75)) %>%
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2019, 2019.75) & Valuation>10) %>%
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(AddDate, desc(Valuation)) %>% filter(between(YM, 2019, 2019.75) &
+                                                     between(Valuation, 4, 9.99) ) %>%
+  dplyr::select(-Industry,-City,-SelInvestors)
+```
+
+In 2019, there were over 95 unicorns, appearing in every month but November and December. The distribution of Valuations appears here. Most are under \$10B. Only February, March and April were months over \$`r UCL`B in total valuations.
+```{r echo=FALSE}
+ggplot(cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2019, 2019.95)) %>%
+  dplyr::select(-Industry,-City,-SelInvestors))  +
+  geom_histogram(aes(Valuation), color="black", fill="red2", alpha=.3, binwidth=1)
+```
+
+Looking at those three months, we find only 6 with total valuation over \$10B. There are 6 with Valuation over \$10B, the largest being Epic Games at \$42B and Checkout.com at \$40b, with Databricks third at \$38B, Grammarly fourth at \$13B, and Faire fifth at \$12.4B. There are 24 with Valuation between \$4B and \$9.9B.
+
+In 2020 on the other hand, things mushroomed out of control.
+```{r}
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2020, 2020.99)) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2020, 2020.99) & Valuation>10) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2020, 2020.99) & 
+                                                     between(Valuation, 4, 9.99) ) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+```
+
+Overall in 2020 there were 108 unicorns listed, added in every month of the year. However, only 3 exceeded \$10B, and those were Yuanqi Senlin (\$15B), Xingsheng Selected (\$12B), and goPuff (\$15B). There were 31 firms in excess of \$4B. Clearly the volume was high, but the size of the unicorns was smaller.  
+
+This matches the perception we got from the linear regressions. Size of unicorns is shrinking, but number is increasing.
+
+Does this mean simply that they have not had enough time to get big?  
+
+Looking at 2021 we see this.
+```{r}
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2021, 2021.99)) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2021, 2021.99) & Valuation>10) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+
+cbi_more %>% arrange(YM, desc(Valuation)) %>% filter(between(YM, 2021, 2021.99) & 
+                                                     between(Valuation, 4, 9.99) ) %>% 
+  dplyr::select(-Industry,-City,-SelInvestors)
+```
+
+Now there are 519 unicorns. Only 9 of them are valued at \$10B or more. And 48 are valued between \$4B and \$9.9B; most are smaller.
+
+### By Quarter
+We try Quarterly simply to eliminate it. Again the log TotVal regression is significantly better.
+```{r}
+# fit.sumvalq = lm(TotVal~YQ, data=cbi_q)
+# summary(fit.sumvalq)
+# fit.sumval2q = lm(`sum.Valuation.`~poly(YQ,2), data=cbi_dfq)
+# summary(fit.sumval2q)
+# fit.sumval3q = lm(`sum.Valuation.`~poly(YQ,3), data=cbi_dfq)
+# summary(fit.sumval3q)
+fit.sumval_expq=lm(log(TotVal)~YQ, data=cbi_q)
+ols_test_normality(fit.sumval_expq)
+summary(fit.sumval_expq)
+```
+
+The log fit shows that an exponential trend is probable. We can accept the hypothesis that residuals of the log regression are normal. Plotting the log regression with the data gives
+```{r echo=FALSE}
+ggplot(cbi_q) +
+  geom_point(aes(YQ, log(TotVal))) +
+  geom_smooth(aes(YQ, log(TotVal)), method="lm", se=T, formula='y~x') +
+  geom_text(aes(x=2020, y=0, label=paste0("Slope=",round(coef(fit.sumval_expq)[2], digits=4)))) +
+  geom_text(aes(x=2015, 
+                y=-.5, 
+                label=paste0("Total Valuation Change/Year=$",
+                             round(exp(coef(fit.sumval_expq)[2]), digits=3),
+                             "B")))
+```
+
+The log fit is good, with a coefficient of .268. log(change)=.268, so change = \$`r round(exp(.268),2)`B per year.  
+
+Is there a structural change over this period? There are no quarters before 2020 with TotVal greater than \$`r round(UCLq,3)`B. All we see is a spike in 2021.
+```{r echo=FALSE}
+UCLq=mean(cbi_q$TotVal) + 2*sd(cbi_q$TotVal)
+cbi_q %>% ggplot(aes(YQ,TotVal)) + 
+  lemon::geom_pointline(linetype="dotted") +
+  geom_hline(aes(yintercept=UCLq), linetype="dotted", color="red") +
+  geom_label(data=cbi_q %>% filter(TotVal>UCLq & YQ<2020), 
+                                    aes(x=YQ, y=TotVal,label=round(YQ,digits=2))) +
+  geom_text(aes(x=2010,y=UCLq,label=round(UCLq,2)))
+```
+
+## Parsing by Industry
+Which industries gain higher Valuations? And Which Industries have more unicorns?
+
+### Valuation by Industry
+```{r echo=FALSE}
+x = cbi_more %>% arrange(Year, Industry) %>% group_by(IndShort, Year, Class) %>% summarize(TotVal=sum(Valuation))
+glimpse(x)
+x
+```
+
+```{r}
+px=ggplot(x %>% filter(between(Year,2016,2021) )) + 
+  geom_col(aes(IndShort,TotVal, fill=Class), color="black", alpha=1) +
+  scale_fill_manual(values = c("blue","yellow","red")) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1)) +
+  labs(title="Total Valuations by Industry and Year",
+       x="Industry") +
+  facet_wrap(vars(Year), ncol=2)
+px
+# ggsave("Valuations by Industry and Year.jpg", plot=px, device="jpeg", height=7 )
+```
+
+Total Valuation in 2021 is higher in specific industries, particularly Fintech and Internet services & software. These two have been big since 2018. In 2017 it was far and away Artificial intelligence, with Edtech far behind. In 2016 it was E-commerce & direct-to-consumer. It's clear the big valuations are occurring in areas which are not Hardware-related.
+
+### Count by Industry
+```{r}
+y = cbi_more %>% arrange(Year, Industry) %>% group_by(IndShort, Year, Class) %>% summarize(Count=n())
+glimpse(y)
+```
+
+```{r}
+py=ggplot(y %>% filter(between(Year,2016,2021) )) + 
+  geom_col(aes(IndShort,Count, fill=Class), color="black", alpha=1, orientation="x") +
+  scale_fill_manual(values=c("blue","yellow","red")) +
+  theme(axis.text.x = element_text(angle = 60, vjust = 1, hjust=1)) +
+  labs(title="Count by Industry and Year") +
+  facet_wrap(vars(Year), ncol=2)
+py
+# ggsave("Counts by Industry and Year.jpg", plot=py, device="jpeg", height=7 )
+```
+If we look at counts of firms by Industry over these same years, we see that in 2021, Artificial intelligence, E-commerce & direct-to-consumer, Fintech, Health, and Internet software & services dominate.  Supply chain, logistics & delivery has become noticeable, as has Cybersecurity.
+
+
+## References
+1. https://www.cbinsights.com/?utm_campaign=marketing_unicorns-list_2022-02
+
+2. https://stackoverflow.com/questions/1735540/creating-a-pareto-chart-with-ggplot2-and-r
+
+3. https://stats.stackexchange.com/questions/36212/what-tests-do-i-use-to-confirm-that-residuals-are-normally-distributed
+
+
